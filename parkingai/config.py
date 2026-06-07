@@ -10,6 +10,7 @@ separate nested keys, e.g.::
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import List, Optional
@@ -18,6 +19,9 @@ import yaml
 from pydantic import BaseModel, Field
 
 ENV_PREFIX = "PARKINGAI_"
+# Live UI-tuned distortion values are saved here so they survive a restart
+# without rewriting (and reformatting) config.yaml.
+CALIBRATION_SIDECAR = "calibration.json"
 
 
 class CameraConfig(BaseModel):
@@ -121,10 +125,27 @@ def _apply_env_overrides(data: dict) -> dict:
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
-    """Load configuration from YAML (if present) plus environment overrides."""
+    """Load configuration from YAML (if present) plus environment overrides.
+
+    If a ``calibration.json`` sidecar exists (written by the UI tuner), its
+    values override the ``calibration`` section.
+    """
     data: dict = {}
     p = Path(path)
     if p.exists():
         data = yaml.safe_load(p.read_text()) or {}
     data = _apply_env_overrides(data)
+
+    sidecar = Path(CALIBRATION_SIDECAR)
+    if sidecar.exists():
+        try:
+            data.setdefault("calibration", {}).update(json.loads(sidecar.read_text()))
+        except (ValueError, OSError):
+            pass  # ignore a corrupt sidecar; fall back to config.yaml
+
     return AppConfig.model_validate(data)
+
+
+def save_calibration(data: dict, path: str | Path = CALIBRATION_SIDECAR) -> None:
+    """Persist the live calibration so it is reapplied on the next start."""
+    Path(path).write_text(json.dumps(data, indent=2))

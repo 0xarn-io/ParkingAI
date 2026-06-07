@@ -15,6 +15,9 @@ __pycache__/
 *.onnx
 *_ncnn_model/
 
+# Per-camera runtime state (drawn zones, UI-tuned distortion)
+calibration.json
+
 # Captured frames / recordings
 snapshots/
 *.mp4

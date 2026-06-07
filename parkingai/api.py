@@ -8,10 +8,25 @@ from typing import Optional
 
 from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
-from .config import AppConfig, load_config
+from .config import AppConfig, load_config, save_calibration
 from .engine import Engine
 from .zones import load_zones
+
+
+class CalibrationUpdate(BaseModel):
+    """Partial distortion-correction update from the UI (only set fields apply)."""
+
+    enabled: Optional[bool] = None
+    model: Optional[str] = None
+    k1: Optional[float] = None
+    k2: Optional[float] = None
+    k3: Optional[float] = None
+    p1: Optional[float] = None
+    p2: Optional[float] = None
+    focal_scale: Optional[float] = None
+    balance: Optional[float] = None
 
 _MJPEG_BOUNDARY = "frame"
 
@@ -22,20 +37,86 @@ _INDEX_HTML = """<!doctype html>
   header{padding:10px 16px;background:#000;font-size:18px}
   main{display:flex;flex-wrap:wrap;gap:16px;padding:16px}
   img{max-width:100%;border:1px solid #333;border-radius:6px}
-  #stats{font-size:15px;line-height:1.6}
+  #side{font-size:15px;line-height:1.6;min-width:280px}
   .pill{display:inline-block;padding:2px 8px;border-radius:10px;margin:2px}
   .free{background:#0a0}.occ{background:#a00}
+  .panel{margin-top:18px;padding:12px;background:#1b1b1b;border:1px solid #333;border-radius:8px}
+  .panel h3{margin:0 0 8px;font-size:15px}
+  .row{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .row label{width:90px;font-size:13px}
+  .row input[type=range]{flex:1}
+  .row .val{width:48px;text-align:right;font-variant-numeric:tabular-nums}
+  button{background:#2a6;color:#fff;border:0;padding:7px 12px;border-radius:6px;cursor:pointer}
+  select{background:#222;color:#eee;border:1px solid #444;border-radius:4px;padding:3px}
+  .hint{font-size:12px;color:#999;margin-top:6px}
 </style></head>
 <body>
   <header>ParkingAI &mdash; live occupancy</header>
   <main>
     <img src="/stream" alt="live stream"/>
-    <div id="stats">loading&hellip;</div>
+    <div id="side">
+      <div id="stats">loading&hellip;</div>
+
+      <div class="panel">
+        <h3>Lens distortion</h3>
+        <div class="row">
+          <label><input type="checkbox" id="enabled"> enabled</label>
+          <select id="model">
+            <option value="pinhole">pinhole (barrel)</option>
+            <option value="fisheye">fisheye</option>
+          </select>
+        </div>
+        <div class="row"><label>k1</label><input type="range" id="k1" min="-0.8" max="0.4" step="0.01"><span class="val" id="k1_v"></span></div>
+        <div class="row"><label>k2</label><input type="range" id="k2" min="-0.5" max="0.5" step="0.01"><span class="val" id="k2_v"></span></div>
+        <div class="row"><label>k3</label><input type="range" id="k3" min="-0.3" max="0.3" step="0.01"><span class="val" id="k3_v"></span></div>
+        <div class="row"><label>focal</label><input type="range" id="focal_scale" min="0.3" max="2.0" step="0.05"><span class="val" id="focal_scale_v"></span></div>
+        <div class="row"><label>balance</label><input type="range" id="balance" min="0" max="1" step="0.05"><span class="val" id="balance_v"></span></div>
+        <div class="row">
+          <button onclick="saveCal()">Save</button>
+          <span id="saveMsg" style="color:#6c6"></span>
+        </div>
+        <div class="hint">Tune k1 (try -0.25) until edge lines look straight, then
+          re-draw your zones &mdash; the editor uses these same values.</div>
+      </div>
+    </div>
   </main>
   <script>
+    const FIELDS = ['k1','k2','k3','focal_scale','balance'];
+    let debounce;
+
+    async function loadCal(){
+      const c = await (await fetch('/api/calibration')).json();
+      document.getElementById('enabled').checked = !!c.enabled;
+      document.getElementById('model').value = c.model;
+      for(const f of FIELDS){
+        document.getElementById(f).value = c[f];
+        document.getElementById(f+'_v').textContent = (+c[f]).toFixed(2);
+      }
+    }
+    function pushCal(){
+      const body = {enabled: document.getElementById('enabled').checked,
+                    model: document.getElementById('model').value};
+      for(const f of FIELDS){
+        const v = parseFloat(document.getElementById(f).value);
+        body[f] = v;
+        document.getElementById(f+'_v').textContent = v.toFixed(2);
+      }
+      clearTimeout(debounce);
+      debounce = setTimeout(() => fetch('/api/calibration',
+        {method:'POST', headers:{'Content-Type':'application/json'},
+         body: JSON.stringify(body)}), 60);
+    }
+    async function saveCal(){
+      const r = await fetch('/api/calibration/save', {method:'POST'});
+      document.getElementById('saveMsg').textContent = (await r.json()).saved ? 'saved ✓' : 'error';
+      setTimeout(() => document.getElementById('saveMsg').textContent='', 2000);
+    }
+    ['enabled','model',...FIELDS].forEach(id =>
+      document.getElementById(id).addEventListener('input', pushCal));
+
     async function tick(){
       try{
-        const r = await fetch('/api/status'); const s = await r.json();
+        const s = await (await fetch('/api/status')).json();
         let html = `<b>Free ${s.free} / ${s.total}</b> &nbsp; Occupied ${s.occupied}<br>`;
         html += `camera: ${s.camera_connected?'connected':'disconnected'} &nbsp; ${s.fps} fps<br><br>`;
         for(const z of s.zones){
@@ -45,6 +126,7 @@ _INDEX_HTML = """<!doctype html>
         document.getElementById('stats').innerHTML = html;
       }catch(e){ /* keep last view */ }
     }
+    loadCal();
     setInterval(tick, 1000); tick();
   </script>
 </body></html>
@@ -107,6 +189,30 @@ def create_app(config_path: str = "config.yaml", engine: Optional[Engine] = None
             {"zones": [{"id": s.zone.id, "points": [list(p) for p in s.zone.points]}
                        for s in eng.states.values()]}
         )
+
+    @app.get("/api/calibration")
+    def get_calibration() -> JSONResponse:
+        eng = app.state.engine
+        if eng is None:
+            return JSONResponse({"error": "engine not ready"}, status_code=503)
+        return JSONResponse(eng.get_calibration())
+
+    @app.post("/api/calibration")
+    def update_calibration(body: CalibrationUpdate) -> JSONResponse:
+        eng = app.state.engine
+        if eng is None:
+            return JSONResponse({"error": "engine not ready"}, status_code=503)
+        changes = {k: v for k, v in body.model_dump().items() if v is not None}
+        return JSONResponse(eng.set_calibration(changes))
+
+    @app.post("/api/calibration/save")
+    def persist_calibration() -> JSONResponse:
+        eng = app.state.engine
+        if eng is None:
+            return JSONResponse({"error": "engine not ready"}, status_code=503)
+        data = eng.get_calibration()
+        save_calibration(data)
+        return JSONResponse({"saved": True, "calibration": data})
 
     @app.get("/snapshot")
     def snapshot() -> Response:

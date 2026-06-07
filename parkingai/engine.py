@@ -178,6 +178,14 @@ class Engine:
         with self._lock:
             return self._jpeg
 
+    def get_calibration(self) -> dict:
+        return self.cfg.calibration.model_dump()
+
+    def set_calibration(self, data: dict) -> dict:
+        """Apply distortion-correction params live (from the UI tuner)."""
+        self.undistorter.update(**data)
+        return self.get_calibration()
+
     def status(self) -> dict:
         zones = [
             {

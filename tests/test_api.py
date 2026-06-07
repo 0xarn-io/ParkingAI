@@ -85,3 +85,28 @@ def test_endpoints_available():
         assert client.get("/").status_code == 200
         assert client.get("/api/zones").json()["zones"][0]["id"] == "1"
         assert client.get("/snapshot").headers["content-type"] == "image/jpeg"
+
+
+def test_calibration_live_update():
+    engine = build_engine([])
+    app = create_app(engine=engine)
+    with TestClient(app) as client:
+        _wait_for_jpeg(client)
+        assert client.get("/api/calibration").json()["enabled"] is False
+        out = client.post("/api/calibration",
+                          json={"enabled": True, "k1": -0.3, "model": "pinhole"}).json()
+        assert out["enabled"] is True and out["k1"] == -0.3
+        # the engine's undistorter reflects the change immediately
+        assert engine.undistorter.cfg.enabled is True
+        assert engine.undistorter.cfg.k1 == -0.3
+
+
+def test_calibration_save_writes_sidecar(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    engine = build_engine([])
+    app = create_app(engine=engine)
+    with TestClient(app) as client:
+        _wait_for_jpeg(client)
+        client.post("/api/calibration", json={"enabled": True, "k1": -0.2})
+        assert client.post("/api/calibration/save").json()["saved"] is True
+        assert (tmp_path / "calibration.json").exists()

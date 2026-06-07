@@ -125,6 +125,16 @@ in the corrected image. No checkerboard calibration required. (For a precise
 calibration you can compute real coefficients with an OpenCV checkerboard and
 drop them in here.)
 
+### Tuning it live from the web UI
+
+You don't have to edit YAML and restart. Open `http://localhost:8000` and use
+the **Lens distortion** panel — toggle it on and drag the `k1` / `focal` /
+`balance` sliders while watching the live stream straighten in real time. Hit
+**Save** to persist the values (written to `calibration.json`, which is loaded
+automatically on the next start and overrides `config.yaml`). The same numbers
+are picked up by the zone editor, so the workflow is: *tune distortion → Save →
+re-draw zones.*
+
 ## Adjusting the overlay
 
 The `draw` section controls the on-screen overlay — zone fill translucency,

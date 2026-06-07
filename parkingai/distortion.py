@@ -50,6 +50,13 @@ class Undistorter:
             )
         self._size = (w, h)
 
+    def update(self, **params) -> None:
+        """Change coefficients at runtime (used by the live UI tuner)."""
+        for k, v in params.items():
+            if hasattr(self.cfg, k):
+                setattr(self.cfg, k, v)
+        self._size = None  # force the remap tables to rebuild on next frame
+
     def apply(self, frame: np.ndarray) -> np.ndarray:
         if not self.cfg.enabled:
             return frame
