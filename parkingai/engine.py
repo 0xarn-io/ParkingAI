@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from .config import AppConfig
+from .distortion import Undistorter
 from .zones import Zone, zone_coverage
 
 
@@ -46,6 +47,7 @@ class Engine:
         self.camera = camera
         self.detector = detector
         self.cfg = cfg
+        self.undistorter = Undistorter(cfg.calibration)
         self.states: Dict[str, ZoneState] = {z.id: ZoneState(z) for z in zones}
 
         self._running = False
@@ -81,6 +83,8 @@ class Engine:
             if frame is None:
                 time.sleep(0.05)
                 continue
+            # Correct lens distortion first so detection + zones share one space.
+            frame = self.undistorter.apply(frame)
 
             now = time.time()
             if now - self._last_detect >= self.cfg.detect_interval:
@@ -117,31 +121,55 @@ class Engine:
             state.update(cov, occ.coverage_threshold, occ.smoothing_frames)
 
     # -- rendering -------------------------------------------------------
+    @staticmethod
+    def _label(img, text, org, color, scale):
+        """Draw text with a solid background box so it's readable on any scene."""
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        (tw, th), base = cv2.getTextSize(text, font, scale, 2)
+        x, y = org
+        cv2.rectangle(img, (x - 3, y - th - 5), (x + tw + 3, y + base), color, -1)
+        cv2.putText(img, text, (x, y - 2), font, scale, (255, 255, 255), 2, cv2.LINE_AA)
+
     def _annotate(self, frame: np.ndarray) -> np.ndarray:
         out = frame.copy()
-        # vehicle boxes (thin grey)
-        for b in self._last_boxes:
-            x1, y1, x2, y2 = (int(v) for v in b[:4])
-            cv2.rectangle(out, (x1, y1), (x2, y2), (200, 200, 200), 1)
+        draw = self.cfg.draw
+        green, red = (0, 200, 0), (0, 0, 255)
 
+        # 1) translucent fills (drawn on an overlay, then blended once)
+        if draw.fill_alpha > 0:
+            overlay = out.copy()
+            for state in self.states.values():
+                pts = np.array(state.zone.points, np.int32).reshape(-1, 1, 2)
+                cv2.fillPoly(overlay, [pts], red if state.occupied else green)
+            cv2.addWeighted(overlay, draw.fill_alpha, out, 1 - draw.fill_alpha, 0, out)
+
+        # 2) vehicle detection boxes (bright yellow, clearly visible)
+        if draw.draw_boxes:
+            for b in self._last_boxes:
+                x1, y1, x2, y2 = (int(v) for v in b[:4])
+                cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+        # 3) zone outlines + labels
         free = 0
         for state in self.states.values():
-            pts = np.array(state.zone.points, dtype=np.int32).reshape(-1, 1, 2)
-            color = (0, 0, 255) if state.occupied else (0, 200, 0)
+            pts = np.array(state.zone.points, np.int32).reshape(-1, 1, 2)
+            color = red if state.occupied else green
             if not state.occupied:
                 free += 1
-            cv2.polylines(out, [pts], isClosed=True, color=color, thickness=2)
+            cv2.polylines(out, [pts], True, color, draw.line_thickness, cv2.LINE_AA)
             cx = int(np.mean([p[0] for p in state.zone.points]))
             cy = int(np.mean([p[1] for p in state.zone.points]))
-            cv2.putText(
-                out, state.zone.id, (cx - 8, cy),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA,
-            )
+            tag = f"{state.zone.id}:{'OCC' if state.occupied else 'FREE'}"
+            self._label(out, tag, (cx - 24, cy), color, draw.font_scale)
 
+        # 4) status banner
         total = len(self.states)
-        banner = f"Free: {free}/{total}   Occupied: {total - free}   {self.fps:.0f} fps"
-        cv2.rectangle(out, (0, 0), (out.shape[1], 28), (0, 0, 0), -1)
-        cv2.putText(out, banner, (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+        h = int(34 * max(draw.font_scale, 0.7))
+        cv2.rectangle(out, (0, 0), (out.shape[1], h), (0, 0, 0), -1)
+        self._label(out, f"FREE {free}/{total}", (8, h - 8), green, draw.font_scale)
+        self._label(out, f"OCCUPIED {total - free}", (190, h - 8), red, draw.font_scale)
+        cv2.putText(out, f"{self.fps:.0f} fps", (out.shape[1] - 90, h - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, draw.font_scale * 0.8,
                     (255, 255, 255), 1, cv2.LINE_AA)
         return out
 

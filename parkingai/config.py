@@ -54,6 +54,33 @@ class OccupancyConfig(BaseModel):
     smoothing_frames: int = 3
 
 
+class CalibrationConfig(BaseModel):
+    """Lens distortion correction. Tune by eye - no checkerboard needed."""
+
+    enabled: bool = False
+    model: str = "pinhole"   # "pinhole" (barrel/pincushion) or "fisheye"
+    # Radial coefficients. A small NEGATIVE k1 (e.g. -0.25) removes barrel bow.
+    k1: float = 0.0
+    k2: float = 0.0
+    k3: float = 0.0
+    # Tangential coefficients (rarely needed; leave at 0).
+    p1: float = 0.0
+    p2: float = 0.0
+    # Focal length as a fraction of image width. Lower = wider correction.
+    focal_scale: float = 1.0
+    # 0 = crop away black borders, 1 = keep all pixels (may show black edges).
+    balance: float = 0.0
+
+
+class DrawConfig(BaseModel):
+    """Overlay appearance."""
+
+    fill_alpha: float = 0.28      # translucency of the zone fill (0=outline only)
+    line_thickness: int = 3       # zone outline thickness
+    draw_boxes: bool = True       # draw vehicle detection boxes
+    font_scale: float = 0.7
+
+
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
@@ -66,6 +93,8 @@ class AppConfig(BaseModel):
     camera: CameraConfig = Field(default_factory=CameraConfig)
     detector: DetectorConfig = Field(default_factory=DetectorConfig)
     occupancy: OccupancyConfig = Field(default_factory=OccupancyConfig)
+    calibration: CalibrationConfig = Field(default_factory=CalibrationConfig)
+    draw: DrawConfig = Field(default_factory=DrawConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     # Path to the JSON file holding parking-spot polygons.
     zones_file: str = "zones.json"

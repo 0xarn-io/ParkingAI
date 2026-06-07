@@ -105,6 +105,39 @@ Zones are polygons in `zones.json`:
 Use the interactive editor (`python -m parkingai.editor`) to draw them on a
 real camera frame, or hand-edit the file.
 
+## Fixing lens distortion (barrel / fisheye)
+
+Cheap CCTV lenses bow straight lines outward near the edges, which throws off
+rectangular parking zones. Enable correction in `config.yaml`:
+
+```yaml
+calibration:
+  enabled: true
+  model: "pinhole"   # or "fisheye" for very wide lenses
+  k1: -0.25          # main knob: more negative = more barrel correction
+  focal_scale: 1.0   # lower widens the correction
+  balance: 0.0       # 0 crops black borders, 1 keeps all pixels
+```
+
+Tune `k1` by eye (start at `-0.25`) until edge lines look straight, then
+**re-draw your zones** — the editor applies the same correction so polygons land
+in the corrected image. No checkerboard calibration required. (For a precise
+calibration you can compute real coefficients with an OpenCV checkerboard and
+drop them in here.)
+
+## Adjusting the overlay
+
+The `draw` section controls the on-screen overlay — zone fill translucency,
+outline thickness, label size, and whether vehicle detection boxes are shown:
+
+```yaml
+draw:
+  fill_alpha: 0.28   # 0 = outline only, higher = more solid fill
+  line_thickness: 3
+  draw_boxes: true   # yellow boxes around detected vehicles
+  font_scale: 0.7
+```
+
 ## Raspberry Pi notes
 
 - Install **`opencv-python-headless`** instead of `opencv-python` (no GUI deps).

@@ -22,6 +22,27 @@ occupancy:
   coverage_threshold: 0.15  # fraction of a spot a car must cover to be "occupied"
   smoothing_frames: 3       # consecutive detections needed before a state flips
 
+# Lens distortion correction. Turn on if straight lines bow at the edges.
+# Tune k1 by eye: start around -0.25 for barrel, then re-draw your zones.
+# NOTE: enable this BEFORE drawing zones (the editor applies it too).
+calibration:
+  enabled: false
+  model: "pinhole"   # "pinhole" (barrel/pincushion) or "fisheye"
+  k1: 0.0            # main knob: small NEGATIVE removes barrel bow
+  k2: 0.0
+  k3: 0.0
+  p1: 0.0
+  p2: 0.0
+  focal_scale: 1.0   # lower = wider-angle correction
+  balance: 0.0       # 0 = crop black borders, 1 = keep all pixels
+
+# Overlay appearance.
+draw:
+  fill_alpha: 0.28      # translucency of zone fill (0 = outline only)
+  line_thickness: 3
+  draw_boxes: true      # show vehicle detection boxes (yellow)
+  font_scale: 0.7
+
 server:
   host: "0.0.0.0"
   port: 8000

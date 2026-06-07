@@ -62,6 +62,10 @@ def main() -> None:
     else:
         frame = _grab_frame(args.source or cfg.camera.source)
 
+    # Draw on the SAME corrected frame the engine processes, so zones line up.
+    from .distortion import Undistorter
+    frame = Undistorter(cfg.calibration).apply(frame)
+
     zones: list[Zone] = []
     current: list[tuple[int, int]] = []
 
