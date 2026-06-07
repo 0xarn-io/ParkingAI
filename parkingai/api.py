@@ -72,11 +72,13 @@ _INDEX_HTML = """<!doctype html>
         <div class="row"><label>focal</label><input type="range" id="focal_scale" min="0.3" max="2.0" step="0.05"><span class="val" id="focal_scale_v"></span></div>
         <div class="row"><label>balance</label><input type="range" id="balance" min="0" max="1" step="0.05"><span class="val" id="balance_v"></span></div>
         <div class="row">
+          <button onclick="autoCal()">Auto-guess</button>
           <button onclick="saveCal()">Save</button>
           <span id="saveMsg" style="color:#6c6"></span>
         </div>
-        <div class="hint">Tune k1 (try -0.25) until edge lines look straight, then
-          re-draw your zones &mdash; the editor uses these same values.</div>
+        <div class="hint">Auto-guess estimates the correction from the current
+          frame's straight edges. Then tune k1 by hand if needed, Save, and
+          re-draw your zones (the editor uses these same values).</div>
       </div>
     </div>
   </main>
@@ -110,6 +112,18 @@ _INDEX_HTML = """<!doctype html>
       const r = await fetch('/api/calibration/save', {method:'POST'});
       document.getElementById('saveMsg').textContent = (await r.json()).saved ? 'saved ✓' : 'error';
       setTimeout(() => document.getElementById('saveMsg').textContent='', 2000);
+    }
+    async function autoCal(){
+      const msg = document.getElementById('saveMsg');
+      msg.textContent = 'estimating…';
+      const res = await (await fetch('/api/calibration/auto', {method:'POST'})).json();
+      if(res.ok){
+        await loadCal();
+        msg.textContent = `k1=${res.k1} (-${Math.round(res.improvement*100)}% bend)`;
+      } else {
+        msg.textContent = res.reason || 'failed';
+      }
+      setTimeout(() => msg.textContent='', 4000);
     }
     ['enabled','model',...FIELDS].forEach(id =>
       document.getElementById(id).addEventListener('input', pushCal));
@@ -213,6 +227,23 @@ def create_app(config_path: str = "config.yaml", engine: Optional[Engine] = None
         data = eng.get_calibration()
         save_calibration(data)
         return JSONResponse({"saved": True, "calibration": data})
+
+    @app.post("/api/calibration/auto")
+    def auto_calibration() -> JSONResponse:
+        eng = app.state.engine
+        if eng is None:
+            return JSONResponse({"error": "engine not ready"}, status_code=503)
+        frame = eng.camera.read()  # raw frame, before correction
+        if frame is None:
+            return JSONResponse({"ok": False, "reason": "no frame yet"}, status_code=503)
+        from .autocalib import estimate
+
+        cur = eng.get_calibration()
+        res = estimate(frame, model=cur["model"], focal_scale=cur["focal_scale"])
+        if res.get("ok"):
+            # apply the guess live so the user sees it immediately
+            res["calibration"] = eng.set_calibration({"enabled": True, "k1": res["k1"]})
+        return JSONResponse(res)
 
     @app.get("/snapshot")
     def snapshot() -> Response:

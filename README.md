@@ -135,6 +135,22 @@ automatically on the next start and overrides `config.yaml`). The same numbers
 are picked up by the zone editor, so the workflow is: *tune distortion → Save →
 re-draw zones.*
 
+### Auto-guessing the correction
+
+Click **Auto-guess** in the UI (or run it offline) and ParkingAI estimates the
+correction straight from the camera image: it sweeps `k1` and keeps the value
+that turns the scene's bowed edges into the most straight-line length. Best on
+scenes with several genuinely straight lines (platform edges, kerbs, railings).
+Treat it as a starting point and fine-tune the slider.
+
+```bash
+python -m parkingai.autocalib --source "$PARKINGAI_CAMERA__SOURCE"
+python -m parkingai.autocalib --image frame.jpg     # or from a saved still
+```
+
+It's a heuristic, not a metric calibration — for a precise result use an OpenCV
+checkerboard and enter the computed coefficients by hand.
+
 ## Adjusting the overlay
 
 The `draw` section controls the on-screen overlay — zone fill translucency,
