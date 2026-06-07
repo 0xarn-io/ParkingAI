@@ -1,0 +1,62 @@
+# ParkingAI configuration.
+# Any value can be overridden by an env var, e.g. PARKINGAI_SERVER__PORT=9000.
+
+camera:
+  # Your RTSP camera. Tip: keep credentials out of git by setting
+  #   export PARKINGAI_CAMERA__SOURCE="rtsp://user:pass@host:554/stream1"
+  # and removing the URL below.
+  source: "rtsp://street:12345678@192.168.1.50:554/stream1"
+  rtsp_tcp: true
+  reconnect_delay: 3.0
+  loop_file: true       # only relevant when source is a video file
+
+detector:
+  model: "yolov8n.pt"   # smallest/fastest; great starting point for a Pi
+  confidence: 0.35
+  iou: 0.5
+  device: "auto"        # auto -> cuda if available else cpu
+  classes: [2, 3, 5, 7] # COCO: car, motorcycle, bus, truck
+  imgsz: 640
+
+occupancy:
+  coverage_threshold: 0.15  # fraction of a spot a car must cover to be "occupied"
+  smoothing_frames: 3       # consecutive detections needed before a state flips
+
+# Lens distortion correction. Turn on if straight lines bow at the edges.
+# Tune k1 by eye: start around -0.25 for barrel, then re-draw your zones.
+# NOTE: enable this BEFORE drawing zones (the editor applies it too).
+calibration:
+  enabled: false
+  model: "pinhole"   # "pinhole" (barrel/pincushion) or "fisheye"
+  k1: 0.0            # main knob: small NEGATIVE removes barrel bow
+  k2: 0.0
+  k3: 0.0
+  p1: 0.0
+  p2: 0.0
+  focal_scale: 1.0   # lower = wider-angle correction
+  balance: 0.0       # 0 = crop black borders, 1 = keep all pixels
+
+# Vehicle tracking, re-identification, and parking statistics (SQLite).
+recognition:
+  enabled: true
+  iou_threshold: 0.3        # how much a detection must overlap a track to match
+  max_misses: 5             # detections a track survives unseen before it's dropped
+  reid_threshold: 0.4       # fingerprint distance to call it the same car (lower=stricter)
+  min_session_seconds: 5.0  # ignore parking "blips" shorter than this
+  db_path: "parkingai.db"
+
+# Overlay appearance.
+draw:
+  fill_alpha: 0.28      # translucency of zone fill (0 = outline only)
+  line_thickness: 3
+  draw_boxes: true      # show vehicle detection boxes (yellow)
+  font_scale: 0.7
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  jpeg_quality: 80
+  stream_fps: 12.0
+
+zones_file: "zones.json"
+detect_interval: 1.0   # run YOLO at most once per second (lower CPU on a Pi)

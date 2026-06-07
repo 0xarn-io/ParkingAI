@@ -1,20 +1,37 @@
-import os
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+"""ParkingAI entrypoint - starts the FastAPI server.
 
-import cv2
-url = "rtsp://street:12345678@192.168.1.50:554/stream1"
-cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+    python main.py                 # use config.yaml
+    python main.py --config x.yaml
+    python main.py --host 0.0.0.0 --port 8000
 
-if not cap.isOpened():
-    raise RuntimeError("Could not open stream")
+The original quick RTSP-viewer script lives on in spirit: the camera module
+sets the same ``rtsp_transport;tcp`` option for reliable RTSP capture.
+"""
 
-while True:
-    ok, frame = cap.read()
-    if not ok:
-        break
-    cv2.imshow("stream1", frame)
-    if cv2.waitKey(1) == 27:   # Esc to quit
-        break
+from __future__ import annotations
 
-cap.release()
-cv2.destroyAllWindows()
+import argparse
+
+import uvicorn
+
+from parkingai.api import create_app
+from parkingai.config import load_config
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="ParkingAI server")
+    ap.add_argument("--config", default="config.yaml")
+    ap.add_argument("--host", default=None)
+    ap.add_argument("--port", type=int, default=None)
+    args = ap.parse_args()
+
+    cfg = load_config(args.config)
+    host = args.host or cfg.server.host
+    port = args.port or cfg.server.port
+
+    app = create_app(config_path=args.config)
+    uvicorn.run(app, host=host, port=port)
+
+
+if __name__ == "__main__":
+    main()
