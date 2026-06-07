@@ -85,6 +85,19 @@ class DrawConfig(BaseModel):
     font_scale: float = 0.7
 
 
+class RecognitionConfig(BaseModel):
+    """Vehicle tracking, re-identification, and parking statistics."""
+
+    enabled: bool = True
+    iou_threshold: float = 0.3     # IoU for associating a detection to a track
+    max_misses: int = 5            # detections a track survives unseen before drop
+    # Bhattacharyya distance below which two fingerprints are the same car.
+    # Lower = stricter (fewer false merges, more duplicate identities).
+    reid_threshold: float = 0.4
+    min_session_seconds: float = 5.0  # ignore parking blips shorter than this
+    db_path: str = "parkingai.db"
+
+
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
@@ -99,6 +112,7 @@ class AppConfig(BaseModel):
     occupancy: OccupancyConfig = Field(default_factory=OccupancyConfig)
     calibration: CalibrationConfig = Field(default_factory=CalibrationConfig)
     draw: DrawConfig = Field(default_factory=DrawConfig)
+    recognition: RecognitionConfig = Field(default_factory=RecognitionConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     # Path to the JSON file holding parking-spot polygons.
     zones_file: str = "zones.json"

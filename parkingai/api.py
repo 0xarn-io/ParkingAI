@@ -15,6 +15,10 @@ from .engine import Engine
 from .zones import load_zones
 
 
+class RenameVehicle(BaseModel):
+    name: str
+
+
 class CalibrationUpdate(BaseModel):
     """Partial distortion-correction update from the UI (only set fields apply)."""
 
@@ -80,6 +84,12 @@ _INDEX_HTML = """<!doctype html>
           frame's straight edges. Then tune k1 by hand if needed, Save, and
           re-draw your zones (the editor uses these same values).</div>
       </div>
+
+      <div class="panel">
+        <h3>Vehicles &amp; statistics</h3>
+        <div id="statsSummary" class="hint">&mdash;</div>
+        <table id="vehTable" style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px"></table>
+      </div>
     </div>
   </main>
   <script>
@@ -128,20 +138,50 @@ _INDEX_HTML = """<!doctype html>
     ['enabled','model',...FIELDS].forEach(id =>
       document.getElementById(id).addEventListener('input', pushCal));
 
+    function dur(sec){
+      if(sec==null) return '';
+      sec=Math.round(sec); const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60;
+      return h?`${h}h ${m}m`:(m?`${m}m ${s}s`:`${s}s`);
+    }
     async function tick(){
       try{
         const s = await (await fetch('/api/status')).json();
         let html = `<b>Free ${s.free} / ${s.total}</b> &nbsp; Occupied ${s.occupied}<br>`;
         html += `camera: ${s.camera_connected?'connected':'disconnected'} &nbsp; ${s.fps} fps<br><br>`;
         for(const z of s.zones){
+          const who = z.occupant ? ` ${z.occupant} · ${dur(z.dwell_seconds)}` : '';
           html += `<span class="pill ${z.occupied?'occ':'free'}">${z.id}: `
-               +  `${z.occupied?'occupied':'free'} (${z.coverage})</span> `;
+               +  `${z.occupied?'occupied':'free'}${who}</span> `;
         }
         document.getElementById('stats').innerHTML = html;
       }catch(e){ /* keep last view */ }
     }
+    async function rename(id, cur){
+      const name = prompt('Rename vehicle', cur);
+      if(!name) return;
+      await fetch(`/api/vehicles/${id}/rename`,
+        {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})});
+      statsTick();
+    }
+    async function statsTick(){
+      try{
+        const st = await (await fetch('/api/stats')).json();
+        if(st.error){ document.getElementById('statsSummary').textContent='recognition disabled'; return; }
+        document.getElementById('statsSummary').innerHTML =
+          `known: <b>${st.vehicles_known}</b> &nbsp; parked now: <b>${st.currently_parked}</b>`
+          + ` &nbsp; today: ${st.sessions_today} &nbsp; avg stay: ${dur(st.avg_park_seconds)}`;
+        const vs = (await (await fetch('/api/vehicles')).json()).vehicles || [];
+        let rows = '<tr style="color:#999;text-align:left"><th>name</th><th>visits</th><th>total</th><th></th></tr>';
+        for(const v of vs.slice(0,12)){
+          rows += `<tr><td>${v.name}</td><td>${v.visits}</td><td>${dur(v.total_parked)}</td>`
+               + `<td><button style="padding:2px 6px" onclick="rename(${v.id},'${v.name.replace(/'/g,"")}')">rename</button></td></tr>`;
+        }
+        document.getElementById('vehTable').innerHTML = rows;
+      }catch(e){ /* keep last view */ }
+    }
     loadCal();
     setInterval(tick, 1000); tick();
+    setInterval(statsTick, 3000); statsTick();
   </script>
 </body></html>
 """
@@ -169,7 +209,12 @@ def create_app(config_path: str = "config.yaml", engine: Optional[Engine] = None
             )
             detector = build_detector(cfg.detector)
             zones = load_zones(cfg.zones_file)
-            app.state.engine = Engine(cam, detector, zones, cfg).start()
+            store = None
+            if cfg.recognition.enabled:
+                from .store import Store
+
+                store = Store(cfg.recognition.db_path)
+            app.state.engine = Engine(cam, detector, zones, cfg, store=store).start()
         elif not getattr(app.state.engine, "_running", False):
             app.state.engine.start()
         yield
@@ -203,6 +248,39 @@ def create_app(config_path: str = "config.yaml", engine: Optional[Engine] = None
             {"zones": [{"id": s.zone.id, "points": [list(p) for p in s.zone.points]}
                        for s in eng.states.values()]}
         )
+
+    def _store():
+        eng = app.state.engine
+        return eng.store if eng is not None else None
+
+    @app.get("/api/stats")
+    def stats() -> JSONResponse:
+        store = _store()
+        if store is None:
+            return JSONResponse({"error": "recognition disabled"}, status_code=404)
+        return JSONResponse(store.summary())
+
+    @app.get("/api/vehicles")
+    def vehicles() -> JSONResponse:
+        store = _store()
+        if store is None:
+            return JSONResponse({"error": "recognition disabled"}, status_code=404)
+        return JSONResponse({"vehicles": store.list_vehicles()})
+
+    @app.get("/api/sessions")
+    def sessions(limit: int = 50) -> JSONResponse:
+        store = _store()
+        if store is None:
+            return JSONResponse({"error": "recognition disabled"}, status_code=404)
+        return JSONResponse({"sessions": store.list_sessions(min(limit, 500))})
+
+    @app.post("/api/vehicles/{vehicle_id}/rename")
+    def rename_vehicle(vehicle_id: int, body: RenameVehicle) -> JSONResponse:
+        store = _store()
+        if store is None:
+            return JSONResponse({"error": "recognition disabled"}, status_code=404)
+        ok = store.rename(vehicle_id, body.name)
+        return JSONResponse({"renamed": ok}, status_code=200 if ok else 409)
 
     @app.get("/api/calibration")
     def get_calibration() -> JSONResponse:

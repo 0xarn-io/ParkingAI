@@ -105,6 +105,53 @@ Zones are polygons in `zones.json`:
 Use the interactive editor (`python -m parkingai.editor`) to draw them on a
 real camera frame, or hand-edit the file.
 
+## Vehicle recognition & parking statistics
+
+ParkingAI tracks cars, gives each one a friendly made-up name, tries to
+re-recognise returning cars, and records parking sessions to SQLite.
+
+- **Tracking** — a light IoU tracker keeps an ID on each car while it's in view
+  (robust for mostly-stationary parked cars, cheap on a Pi).
+- **Naming + re-ID** — when a car parks, ParkingAI fingerprints it (HSV colour
+  histogram) and either matches a previously-seen car or creates a new one with
+  a name like *"Silver Lynx"*. Rename any car from the UI or the API.
+- **Statistics** — every park is a session: arrival, departure, duration, plus
+  per-vehicle totals (visits, total time parked) and per-spot turnover.
+
+> ⚠️ **Re-ID is fuzzy.** Colour-histogram fingerprints will occasionally merge
+> two similar cars or fail to recognise the same car in very different light.
+> It's a convenience layer, not an identity system. Tune `reid_threshold` in
+> `config.yaml` (lower = stricter), and rename cars you care about.
+
+### Stats endpoints
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/stats` | Summary: vehicles known, parked now, sessions today, avg stay, per-zone turnover |
+| `GET /api/vehicles` | All known vehicles with visits + total time parked |
+| `GET /api/sessions?limit=N` | Recent parking sessions |
+| `POST /api/vehicles/{id}/rename` | `{"name": "..."}` — give a car a real name |
+
+The live status (`/api/status`) also shows the current occupant name and dwell
+time per spot. Turn the whole feature off with `recognition.enabled: false`.
+
+### Can it identify car make & model?
+
+Yes — make/model recognition (MMR) models exist (e.g. classifiers trained on
+the Stanford Cars dataset, Spectrico's ONNX make/model net, or commercial APIs
+like Plate Recognizer's MMR). They'd give a far stronger fingerprint than a
+colour histogram. Two caveats for this project:
+
+1. **Camera angle** — most MMR models are trained on front/rear views. A
+   top-down roof view (like this camera) is out of distribution, so accuracy
+   drops a lot. A lower-angle camera on the entrance would work much better.
+2. **Weight** — an extra CNN per car adds load, though it's only run when a car
+   parks (not every frame), so a Pi can manage it.
+
+The identity layer (`parkingai/identity.py`) is isolated specifically so an MMR
+embedding can be concatenated onto the fingerprint later without touching the
+engine or storage.
+
 ## Fixing lens distortion (barrel / fisheye)
 
 Cheap CCTV lenses bow straight lines outward near the edges, which throws off

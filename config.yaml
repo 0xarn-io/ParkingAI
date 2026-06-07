@@ -36,6 +36,15 @@ calibration:
   focal_scale: 1.0   # lower = wider-angle correction
   balance: 0.0       # 0 = crop black borders, 1 = keep all pixels
 
+# Vehicle tracking, re-identification, and parking statistics (SQLite).
+recognition:
+  enabled: true
+  iou_threshold: 0.3        # how much a detection must overlap a track to match
+  max_misses: 5             # detections a track survives unseen before it's dropped
+  reid_threshold: 0.4       # fingerprint distance to call it the same car (lower=stricter)
+  min_session_seconds: 5.0  # ignore parking "blips" shorter than this
+  db_path: "parkingai.db"
+
 # Overlay appearance.
 draw:
   fill_alpha: 0.28      # translucency of zone fill (0 = outline only)
